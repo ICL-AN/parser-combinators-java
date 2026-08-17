@@ -17,6 +17,28 @@ class PrimitiveParserTest {
     }
 
     @Test
+    void satisfyMatchesAlphanumericFail() {
+        ParsingContext ctx = new ParsingContext("#a7");
+        Character result = Parsers.satisfy(Character::isLetterOrDigit).parse(ctx);
+
+        assertTrue(ctx.failed);
+        assertNull(result);
+        assertEquals(0, ctx.cursor);
+    }
+
+    @Test
+    void satisfyMatchesAlphanumeric() {
+        ParsingContext ctx = new ParsingContext("a7");
+        Character result = Parsers.satisfy(Character::isLetterOrDigit).parse(ctx);
+
+        assertFalse(ctx.failed);
+        assertEquals('a', result);
+        assertEquals(1, ctx.cursor);
+    }
+
+
+
+    @Test
     void satisfyDoesNotConsumeOnFailure() {
         ParsingContext ctx = new ParsingContext("x123");
         Parsers.satisfy(Character::isDigit).parse(ctx);
