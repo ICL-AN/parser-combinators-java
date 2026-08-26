@@ -21,8 +21,7 @@ public final class Parsers {
                 ctx.cursor++;
                 return c;
             } else {
-                ctx.failure();
-                ctx.setLastError("Predicate failure at " + Integer.toString(ctx.cursor));
+                ctx.fail("Predicate failure at " + ctx.cursor);
                 return null;
             }
         };
@@ -36,7 +35,29 @@ public final class Parsers {
      * Failure must leave the cursor where it was before the literal parser began.
      */
     public static TemplateParser<String> literal(String expected) {
-        throw new UnsupportedOperationException("TODO:");
+        return ctx -> {
+            int start = ctx.cursor;
+            int index = 0;
+
+            while (index < expected.length()
+                    && start + index < ctx.input.length()
+                    && ctx.input.charAt(start + index) == expected.charAt(index)) {
+                index++;
+            }
+
+            if (index == expected.length()) {
+                ctx.cursor += expected.length();
+                return expected;
+            }
+
+            if (start + index >= ctx.input.length()) {
+                ctx.fail("Unexpected end of input while matching \"" + expected + "\"");
+            } else {
+                ctx.fail("Literal mismatch at position " + (start + index));
+            }
+
+            return null;
+        };
     }
 
     /**
@@ -45,6 +66,12 @@ public final class Parsers {
      * If characters remain, mark the parse as failed and describe the unexpected remaining input.
      */
     public static TemplateParser<Void> eof() {
-        throw new UnsupportedOperationException("TODO: eof");
+        return ctx -> {
+            if (ctx.cursor < ctx.input.length()) {
+                ctx.fail("Trailing input begins with '" + ctx.input.charAt(ctx.cursor)
+                        + "' at position " + ctx.cursor);
+            }
+            return null;
+        };
     }
 }
