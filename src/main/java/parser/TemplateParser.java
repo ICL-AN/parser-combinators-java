@@ -29,6 +29,19 @@ public interface TemplateParser<T> {
         };
     }
 
+    // Uses the parsed value to choose and run the next parser.
+    default <U> TemplateParser<U> flatMap(Function<T, TemplateParser<U>> mapper) {
+        return ctx -> {
+            T value = parse(ctx);
+            if (ctx.failed) {
+                return null;
+            }
+            TemplateParser<U> chosenParser = mapper.apply(value);
+
+            return chosenParser.parse(ctx);
+        };
+    }
+
     // Runs two parsers sequentially and returns both results.
     default <U> TemplateParser<Result<T, U>> andThen(TemplateParser<U> next) {
         return ctx -> {

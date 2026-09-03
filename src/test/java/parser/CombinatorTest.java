@@ -35,6 +35,17 @@ class CombinatorTest {
     }
 
     @Test
+    void flatMapUsesParsedValueToChooseNextParser() {
+        TemplateParser<Character> digit =
+                Parsers.satisfy(Character::isDigit);
+
+        TemplateParser<String> parser =
+                digit.flatMap(d -> Parsers.literal(String.valueOf(d).repeat(2)));
+
+        assertEquals("33", parser.run("333"));
+    }
+
+    @Test
     void orUsesSecondParserAfterFirstFails() {
         TemplateParser<String> parser =
                 Parsers.literal("hello").or(Parsers.literal("help"));
