@@ -1,4 +1,4 @@
-Java Parser Combinators
+**Java Parser Combinators**
 
 A parser combinator library implemented in Java.
 
