@@ -1,5 +1,6 @@
 package parser;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
@@ -9,110 +10,291 @@ public interface TemplateParser<T> {
 
     T parse(ParsingContext ctx);
 
+    // Runs this parser against a fresh input string.
     default T run(String input) {
         ParsingContext ctx = new ParsingContext(input);
         return parse(ctx);
     }
 
-    /**
-     * Run this parser and, if it succeeds, transform its produced value using mapper.
-     * Mapping must not itself consume input or alter where the parser cursor has reached.
-     * If this parser fails, propagate that failure and do not call the mapping function.
-     */
+    // Transforms the result of a successful parse without consuming more input.
     default <U> TemplateParser<U> map(Function<T, U> mapper) {
-        throw new UnsupportedOperationException("TODO: map");
+        return ctx -> {
+            T value = parse(ctx);
+
+            if (ctx.failed) {
+                return null;
+            }
+
+            return mapper.apply(value);
+        };
     }
 
-    /**
-     * Run this parser first and then run next starting exactly where this parser finished.
-     * The combined parser succeeds only when both parsers succeed, returning both results.
-     * Decide what state should remain if the first succeeds but the second parser fails.
-     */
+    // Runs two parsers sequentially and returns both results.
     default <U> TemplateParser<Result<T, U>> andThen(TemplateParser<U> next) {
-        throw new UnsupportedOperationException("TODO: andThen");
+        return ctx -> {
+            int start = ctx.cursor;
+
+            T first = parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            U second = next.parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            return new Result<>(first, second);
+        };
     }
 
-    /**
-     * Try this parser first; only if it fails should the alternative parser be attempted.
-     * The alternative must see the same input position that this parser originally started at.
-     * Therefore failure of the first branch requires carefully restoring its consumed state.
-     */
+    // Tries this parser first and backtracks before trying the alternative.
     default TemplateParser<T> or(TemplateParser<T> alternative) {
-        throw new UnsupportedOperationException("TODO: or");
+        return ctx -> {
+            int start = ctx.cursor;
+
+            T value = parse(ctx);
+
+            if (!ctx.failed) {
+                return value;
+            }
+
+            ctx.cursor = start;
+            ctx.clearFailure();
+
+            T alternativeValue = alternative.parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+            }
+
+            return alternativeValue;
+        };
     }
 
-    /**
-     * Attempt this parser but turn ordinary parse failure into a successful empty Optional.
-     * A failed optional parse must consume absolutely no input and must clear its failure state.
-     * A successful parse keeps its consumed input and returns Optional.of(the parsed value).
-     */
+    // Converts parse failure into a successful empty Optional.
     default TemplateParser<Optional<T>> maybe() {
-        throw new UnsupportedOperationException("TODO: maybe");
+        return ctx -> {
+            int start = ctx.cursor;
+
+            T value = parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                ctx.clearFailure();
+                return Optional.empty();
+            }
+
+            return Optional.ofNullable(value);
+        };
     }
 
-    /**
-     * Repeatedly run this parser until the next attempt fails, collecting every successful result.
-     * The failed final attempt is only the signal to stop, so its cursor changes must be rolled back.
-     * Guard against a parser that succeeds without advancing the cursor or this loop never terminates.
-     */
+    // Repeats this parser zero or more times.
     default TemplateParser<List<T>> many() {
-        throw new UnsupportedOperationException("TODO: many");
+        return ctx -> {
+            List<T> results = new ArrayList<>();
+
+            while (true) {
+                int start = ctx.cursor;
+
+                T value = parse(ctx);
+
+                if (ctx.failed) {
+                    ctx.cursor = start;
+                    ctx.clearFailure();
+                    break;
+                }
+
+                if (ctx.cursor == start) {
+                    throw new IllegalStateException(
+                            "many() parser succeeded without consuming input"
+                    );
+                }
+
+                results.add(value);
+            }
+
+            return results;
+        };
     }
 
-    /**
-     * Behave like many(), except the parser must successfully match at least one occurrence.
-     * Failure on the very first attempt means many1 itself fails rather than returning an empty list.
-     * After one success, later failure simply terminates repetition exactly as it does for many().
-     */
+    // Repeats this parser one or more times.
     default TemplateParser<List<T>> many1() {
-        throw new UnsupportedOperationException("TODO: many1");
+        return ctx -> {
+            int start = ctx.cursor;
+            List<T> results = new ArrayList<>();
+
+            T first = parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            if (ctx.cursor == start) {
+                throw new IllegalStateException(
+                        "many1() parser succeeded without consuming input"
+                );
+            }
+
+            results.add(first);
+
+            while (true) {
+                int attempt = ctx.cursor;
+
+                T value = parse(ctx);
+
+                if (ctx.failed) {
+                    ctx.cursor = attempt;
+                    ctx.clearFailure();
+                    break;
+                }
+
+                if (ctx.cursor == attempt) {
+                    throw new IllegalStateException(
+                            "many1() parser succeeded without consuming input"
+                    );
+                }
+
+                results.add(value);
+            }
+
+            return results;
+        };
     }
 
-    /**
-     * Parse zero or more occurrences of this parser with separator appearing only between items.
-     * A separator must never be accepted on its own without a following successfully parsed item.
-     * Think carefully about rollback when a separator succeeds but the item after it then fails.
-     */
+    // Parses zero or more items separated by the given separator.
     default TemplateParser<List<T>> sepBy(TemplateParser<?> separator) {
-        throw new UnsupportedOperationException("TODO: sepBy");
+        return ctx -> {
+            List<T> results = new ArrayList<>();
+            int start = ctx.cursor;
+
+            T first = parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                ctx.clearFailure();
+                return results;
+            }
+
+            results.add(first);
+
+            while (true) {
+                int attempt = ctx.cursor;
+
+                separator.parse(ctx);
+
+                if (ctx.failed) {
+                    ctx.cursor = attempt;
+                    ctx.clearFailure();
+                    break;
+                }
+
+                T value = parse(ctx);
+
+                if (ctx.failed) {
+                    ctx.cursor = attempt;
+                    ctx.clearFailure();
+                    break;
+                }
+
+                if (ctx.cursor == attempt) {
+                    throw new IllegalStateException(
+                            "sepBy() iteration succeeded without consuming input"
+                    );
+                }
+
+                results.add(value);
+            }
+
+            return results;
+        };
     }
 
-    /**
-     * Require open first, then this parser's content, then close, returning only the content value.
-     * The delimiters affect whether parsing succeeds and consume input but their values are discarded.
-     * Treat the entire operation as one parser and decide how partial failure should affect the cursor.
-     */
+    // Parses content surrounded by opening and closing parsers.
     default TemplateParser<T> between(
             TemplateParser<?> open,
             TemplateParser<?> close
     ) {
-        throw new UnsupportedOperationException("TODO: between");
+        return ctx -> {
+            int start = ctx.cursor;
+
+            open.parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            T value = parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            close.parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            return value;
+        };
     }
 
-    /**
-     * Run this parser normally but deliberately discard the value it produces when successful.
-     * Input consumption and parse failure behave exactly as they did for the original parser.
-     * The resulting Void parser is useful for punctuation, whitespace and other structural syntax.
-     */
+    // Runs this parser while discarding its produced value.
     default TemplateParser<Void> skip() {
-        throw new UnsupportedOperationException("TODO: skip");
+        return ctx -> {
+            parse(ctx);
+            return null;
+        };
     }
 
-    /**
-     * Run this parser only to inspect whether it matches at the current position without consuming it.
-     * Return the parser's value on success, but restore the cursor to its original position afterwards.
-     * Failure should also leave the cursor untouched while still reporting that the lookahead failed.
-     */
+    // Tests this parser without consuming any input.
     default TemplateParser<T> lookahead() {
-        throw new UnsupportedOperationException("TODO: lookahead");
+        return ctx -> {
+            int start = ctx.cursor;
+
+            T value = parse(ctx);
+            ctx.cursor = start;
+
+            return value;
+        };
     }
 
-    /**
-     * First parse this parser, then check that forbidden does NOT match immediately afterwards.
-     * The forbidden parser is only a probe and therefore must never consume input itself.
-     * If forbidden does match, this whole parser fails; useful for rules such as keyword boundaries.
-     */
+    // Succeeds only when the forbidden parser does not match immediately afterwards.
     default TemplateParser<T> notFollowedBy(TemplateParser<?> forbidden) {
-        throw new UnsupportedOperationException("TODO: notFollowedBy");
+        return ctx -> {
+            int start = ctx.cursor;
+
+            T value = parse(ctx);
+
+            if (ctx.failed) {
+                ctx.cursor = start;
+                return null;
+            }
+
+            int afterValue = ctx.cursor;
+
+            forbidden.parse(ctx);
+            boolean matched = !ctx.failed;
+
+            ctx.cursor = afterValue;
+
+            if (matched) {
+                ctx.fail("Unexpected following input");
+                ctx.cursor = start;
+                return null;
+            }
+
+            ctx.clearFailure();
+            return value;
+        };
     }
 }
